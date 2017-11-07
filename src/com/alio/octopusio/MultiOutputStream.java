@@ -1,5 +1,6 @@
 package com.alio.octopusio;
 
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -8,13 +9,13 @@ import java.io.PipedOutputStream;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MultiOutputStream extends OutputStream {
 
-	private Executor mExecutor = Executors.newCachedThreadPool();
+	private ExecutorService mExecutor = Executors.newCachedThreadPool();
 
 	private final ConcurrentMap<String, ConcurrentLinkedQueue<byte[]>> mMessageList = new ConcurrentHashMap<String, ConcurrentLinkedQueue<byte[]>>();
 
@@ -25,13 +26,12 @@ public class MultiOutputStream extends OutputStream {
 	private PipedOutputStream mOutputStream;
 
 	private AtomicBoolean mHadClosed = new AtomicBoolean(false);
-	
+
 	public MultiOutputStream() {
 		super();
 		mOutputStream = new PipedOutputStream();
-		mInputStream = new PipedInputStream();
 		try {
-			mOutputStream.connect(mInputStream);
+			mInputStream = new PipedInputStream(mOutputStream);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -47,12 +47,6 @@ public class MultiOutputStream extends OutputStream {
 		}
 	}
 
-	/**
-	 * 创建商品
-	 * 
-	 * @param name
-	 * @param object
-	 */
 	private void appendMessage(String name, byte[] product) {
 		ConcurrentLinkedQueue<byte[]> cProductQueue = null;
 		if (mMessageList.containsKey(name)) {
@@ -67,12 +61,6 @@ public class MultiOutputStream extends OutputStream {
 		}
 	}
 
-	/**
-	 * 删除商品
-	 * 
-	 * @param name
-	 * @param object
-	 */
 	private byte[] obtainMessage(String name) throws InterruptedException {
 		ConcurrentLinkedQueue<byte[]> cProductQueue = null;
 		if (mMessageList.containsKey(name)) {
@@ -102,12 +90,15 @@ public class MultiOutputStream extends OutputStream {
 		}
 	}
 
-	@Override
-	public void close() throws IOException {
-		mHadClosed.set(true);
-		super.close();
+	private synchronized void writeFinished() {
+		mExecutor.shutdownNow();
 	}
 	
+	@Override
+	public void close() throws IOException {
+		super.close();
+	}
+
 	private class InputStreamReader implements Runnable {
 
 		private InputStream mInputStream;
@@ -123,13 +114,12 @@ public class MultiOutputStream extends OutputStream {
 				byte[] buffer = new byte[1024];
 				int len = -1;
 				while ((len = mInputStream.read(buffer)) != -1) {
-					if(mHadClosed.get()) {
-						break;
-					}
 					dispatchMessage(buffer, 0, len);
 				}
 			} catch (IOException e) {
-				e.printStackTrace();
+				// e.printStackTrace();
+				mHadClosed.set(true);
+				writeFinished();
 			} finally {
 				try {
 					mInputStream.close();
@@ -161,10 +151,10 @@ public class MultiOutputStream extends OutputStream {
 			byte[] buffer = null;
 			try {
 				while (true) {
-					if(mOutputStream == null) {
+					if (mOutputStream == null) {
 						break;
 					}
-					if(mHadClosed.get()) {
+					if (mHadClosed.get()) {
 						break;
 					}
 					buffer = obtainMessage(mName);
@@ -174,6 +164,18 @@ public class MultiOutputStream extends OutputStream {
 				e.printStackTrace();
 			}
 		}
+	}
+
+	public static void main(String[] args) throws IOException {
+		MultiOutputStream multiOutputStream = new MultiOutputStream();
+		multiOutputStream.appendOutputStream(new FileOutputStream("file1.txt"));
+		multiOutputStream.appendOutputStream(new FileOutputStream("file2.txt"));
+		multiOutputStream.appendOutputStream(new FileOutputStream("file3.txt"));
+		multiOutputStream.write("hello world\r\n".getBytes("utf-8"));
+		multiOutputStream.write("132432232\r\n".getBytes("utf-8"));
+		multiOutputStream.write("aefadbadf\r\n".getBytes("utf-8"));
+		multiOutputStream.write("fawer\r\n".getBytes("utf-8"));
+		multiOutputStream.close();
 	}
 
 }

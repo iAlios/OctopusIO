@@ -17,10 +17,9 @@ public class MultiInputStream extends InputStream {
 
 	public MultiInputStream() {
 		super();
-		mOutputStream = new PipedOutputStream();
-		mInputStream = new PipedInputStream();
 		try {
-			mInputStream.connect(mOutputStream);
+			mInputStream = new PipedInputStream();
+			mOutputStream = new PipedOutputStream(mInputStream);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}

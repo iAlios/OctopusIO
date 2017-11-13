@@ -16,12 +16,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MultiInputStream extends InputStream {
 
 	private static final int MIN_BUFFER_SIZE = 1024;
-	
+
+	public static interface IBufferListener {
+		byte[] onFilter(byte[] buf, int offset, int size);
+	}
+
 	private enum Status {
 		UNINITALIZED, INITALIZED, RUNNING, FINISHED
 	}
 
-	private ExecutorService mExecutor = Executors.newCachedThreadPool();
+	private ExecutorService mExecutor = null;
 
 	private PipedInputStream mInputStream;
 
@@ -40,13 +44,14 @@ public class MultiInputStream extends InputStream {
 	private ConcurrentLinkedQueue<InputStreamReader> mInputStreamReaderQueue = new ConcurrentLinkedQueue<>();
 
 	private int mMinBufferSize = MIN_BUFFER_SIZE;
-	
+
+	private IBufferListener mBufferListener = null;
+
 	public MultiInputStream() {
 		super();
 		try {
 			mOutputStream = new PipedOutputStream();
 			mInputStream = new PipedInputStream(mOutputStream);
-			mExecutor.execute(new OutputStreamWriter(mOutputStream));
 			mStatus = Status.INITALIZED;
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -56,9 +61,13 @@ public class MultiInputStream extends InputStream {
 	public void setMinBufferSize(int bufferSize) {
 		mMinBufferSize = bufferSize;
 	}
-	
+
 	public void appendInputStream(InputStream... inputStreams) {
 		synchronized (mInputStreamReaderQueue) {
+			if(mExecutor == null) {
+				mExecutor = Executors.newCachedThreadPool();
+				mExecutor.execute(new OutputStreamWriter(mOutputStream));
+			}
 			InputStreamReader cInputStreamReader = null;
 			for (InputStream inputStream : inputStreams) {
 				cInputStreamReader = new InputStreamReader(inputStream);
@@ -70,10 +79,17 @@ public class MultiInputStream extends InputStream {
 		}
 	}
 
+	public void setMessageListener(IBufferListener cBufferListener) {
+		mBufferListener = cBufferListener;
+	}
+
 	private void appendMessage(byte[] buf, int offset, int len) {
 		synchronized (mMessageQueue) {
 			byte[] buffer = new byte[len];
 			System.arraycopy(buf, offset, buffer, 0, len);
+			if (mBufferListener != null) {
+				mBufferListener.onFilter(buffer, 0, len);
+			}
 			mMessageQueue.add(buffer);
 			mMessageQueue.notifyAll();
 		}
@@ -137,6 +153,12 @@ public class MultiInputStream extends InputStream {
 		}
 	}
 
+	@Override
+	public void close() throws IOException {
+		super.close();
+		mExecutor.shutdown();
+	}
+	
 	private interface IInputReaderListener {
 		void onError(InputStreamReader cInputStreamReader, IOException e);
 
